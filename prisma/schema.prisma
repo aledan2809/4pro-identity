@@ -1,0 +1,33 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Identity {
+  globalId       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone          String           @unique @db.VarChar(20)
+  hashedPassword String           @db.VarChar(255)
+  email          String?          @unique
+  firstName      String           @db.VarChar(100)
+  lastName       String           @db.VarChar(100)
+  avatarUrl      String?
+  locale         String           @default("ro") @db.VarChar(10)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(6)
+  phoneChanges   PhoneChangeLog[]
+}
+
+model PhoneChangeLog {
+  id         Int      @id @default(autoincrement())
+  globalId   String   @db.Uuid
+  oldPhone   String   @db.VarChar(20)
+  newPhone   String   @db.VarChar(20)
+  changedAt  DateTime @default(now()) @db.Timestamptz(6)
+  approvedBy String?  @db.Uuid
+  identity   Identity @relation(fields: [globalId], references: [globalId], onDelete: Cascade)
+
+  @@index([globalId])
+}

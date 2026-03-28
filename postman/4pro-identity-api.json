@@ -1,0 +1,124 @@
+{
+  "info": {
+    "name": "4PRO Identity Service",
+    "description": "API collection for the 4PRO Identity Service (Phase 2)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4100"
+    },
+    {
+      "key": "globalId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Register Identity",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.collectionVariables.set('globalId', body.globalId);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/identities",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"+40712345678\",\n  \"password\": \"SecurePass123!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Register Identity (duplicate — expect 409)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/identities",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"+40712345678\",\n  \"password\": \"AnotherPass1!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Register Identity (bad phone — expect 400)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/identities",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"0712345678\",\n  \"password\": \"SecurePass123!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Authenticate",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/authenticate",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"+40712345678\",\n  \"password\": \"SecurePass123!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Authenticate (wrong password — expect 401)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/authenticate",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phone\": \"+40712345678\",\n  \"password\": \"WrongPassword!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get Identity (authenticated)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/identities/{{globalId}}",
+        "description": "Requires sso_token cookie from /authenticate response"
+      }
+    },
+    {
+      "name": "Get Identity (no cookie — expect 401)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/identities/{{globalId}}"
+      }
+    }
+  ]
+}
