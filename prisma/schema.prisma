@@ -7,17 +7,18 @@ generator client {
 }
 
 model Identity {
-  globalId       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phone          String           @unique @db.VarChar(20)
-  hashedPassword String           @db.VarChar(255)
-  email          String?          @unique
-  firstName      String           @db.VarChar(100)
-  lastName       String           @db.VarChar(100)
-  avatarUrl      String?
-  locale         String           @default("ro") @db.VarChar(10)
-  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime         @updatedAt @db.Timestamptz(6)
-  phoneChanges   PhoneChangeLog[]
+  globalId         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone            String           @unique @db.VarChar(20)
+  hashedPassword   String?          @db.VarChar(255)
+  email            String?          @unique
+  firstName        String           @default("") @db.VarChar(100)
+  lastName         String           @default("") @db.VarChar(100)
+  avatarUrl        String?
+  locale           String           @default("ro") @db.VarChar(10)
+  forcePasswordSet Boolean          @default(false)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @db.Timestamptz(6)
+  phoneChanges     PhoneChangeLog[]
 }
 
 model PhoneChangeLog {

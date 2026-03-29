@@ -2,6 +2,7 @@ const { getClient } = require('../lib/prisma');
 const { hashPassword, verifyPassword } = require('../lib/password');
 const { isValidE164, sanitizePhone } = require('../lib/validation');
 const { signToken, verifyToken } = require('../lib/token');
+const { sendOTP, verifyOTP } = require('../lib/twilio');
 
 const SSO_COOKIE = '4pro_sso';
 
@@ -116,6 +117,10 @@ async function authRoutes(fastify) {
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
 
+    if (!identity.hashedPassword) {
+      return reply.code(401).send({ error: 'Password not set. Please use OTP login first.' });
+    }
+
     const valid = await verifyPassword(password, identity.hashedPassword);
     if (!valid) {
       fastify.log.warn(
@@ -143,6 +148,118 @@ async function authRoutes(fastify) {
         path: '/',
       })
       .send({ success: true });
+  });
+
+  // POST /auth/send-otp — send OTP via Twilio Verify
+  fastify.post('/send-otp', async (request, reply) => {
+    const { phone } = request.body || {};
+
+    const sanitized = sanitizePhone(phone);
+    if (!isValidE164(sanitized)) {
+      return reply.code(400).send({ error: 'Invalid phone format. Must be E.164 (e.g. +40712345678)' });
+    }
+
+    try {
+      await sendOTP(sanitized);
+      return reply.send({ success: true, message: 'OTP sent' });
+    } catch (err) {
+      fastify.log.error({ err, phone: sanitized }, 'Failed to send OTP');
+      return reply.code(500).send({ error: 'Failed to send OTP' });
+    }
+  });
+
+  // POST /auth/verify-otp — verify OTP code and authenticate
+  fastify.post('/verify-otp', async (request, reply) => {
+    const { phone, code } = request.body || {};
+
+    const sanitized = sanitizePhone(phone);
+    if (!isValidE164(sanitized)) {
+      return reply.code(400).send({ error: 'Invalid phone format' });
+    }
+
+    if (!code || typeof code !== 'string') {
+      return reply.code(400).send({ error: 'Code is required' });
+    }
+
+    let check;
+    try {
+      check = await verifyOTP(sanitized, code);
+    } catch (err) {
+      fastify.log.error({ err, phone: sanitized }, 'OTP verification failed');
+      return reply.code(500).send({ error: 'OTP verification failed' });
+    }
+
+    if (check.status !== 'approved') {
+      return reply.code(401).send({ error: 'Invalid or expired OTP code' });
+    }
+
+    let identity = await getClient().identity.findUnique({ where: { phone: sanitized } });
+
+    if (!identity) {
+      identity = await getClient().identity.create({
+        data: { phone: sanitized, forcePasswordSet: true },
+      });
+    }
+
+    const needsPassword = !identity.hashedPassword || !!identity.forcePasswordSet;
+    const token = signToken(identity.globalId, identity.phone, needsPassword ? { forcePasswordSet: true } : {});
+
+    reply
+      .setCookie(SSO_COOKIE, token, getCookieOptions())
+      .send({
+        jwt: token,
+        globalId: identity.globalId,
+        forcePasswordSet: needsPassword,
+      });
+  });
+
+  // POST /auth/set-password — set password after OTP verification
+  fastify.post('/set-password', async (request, reply) => {
+    const token = request.cookies?.[SSO_COOKIE] || (request.headers.authorization || '').replace('Bearer ', '');
+    if (!token) {
+      return reply.code(401).send({ error: 'Authentication required' });
+    }
+
+    let payload;
+    try {
+      payload = verifyToken(token);
+    } catch {
+      return reply.code(401).send({ error: 'Invalid or expired token' });
+    }
+
+    const { password, confirmPassword } = request.body || {};
+
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return reply.code(400).send({ error: 'Password must be at least 8 characters' });
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return reply.code(400).send({ error: 'Password must contain at least one uppercase letter' });
+    }
+
+    if (!/\d/.test(password)) {
+      return reply.code(400).send({ error: 'Password must contain at least one number' });
+    }
+
+    if (password !== confirmPassword) {
+      return reply.code(400).send({ error: 'Passwords do not match' });
+    }
+
+    const hashed = await hashPassword(password);
+
+    await getClient().identity.update({
+      where: { globalId: payload.globalId },
+      data: { hashedPassword: hashed, forcePasswordSet: false },
+    });
+
+    const newToken = signToken(payload.globalId, payload.phone);
+
+    reply
+      .setCookie(SSO_COOKIE, newToken, getCookieOptions())
+      .send({
+        jwt: newToken,
+        globalId: payload.globalId,
+      });
   });
 
   // GET /auth/verify — validate SSO cookie and return identity profile

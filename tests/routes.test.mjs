@@ -68,6 +68,12 @@ const mockPrisma = {
 const prismaModule = require('../src/lib/prisma');
 prismaModule.getClient = () => mockPrisma;
 
+// Mock Twilio service
+const twilioModule = require('../src/lib/twilio');
+let mockOtpStatus = 'approved';
+twilioModule.sendOTP = async (phone) => ({ sid: 'mock-sid', status: 'pending' });
+twilioModule.verifyOTP = async (phone, code) => ({ status: mockOtpStatus });
+
 const { build } = require('../src/server');
 
 let app;
@@ -85,6 +91,7 @@ beforeEach(() => {
   mockDb.identities = [];
   mockDb.phoneLogs = [];
   idCounter = 0;
+  mockOtpStatus = 'approved';
 });
 
 describe('GET /health', () => {
@@ -366,5 +373,209 @@ describe('POST /identity/change-phone', () => {
       payload: { newPhone: '0799999999', verificationCode: '123456' },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('POST /auth/send-otp', () => {
+  it('should send OTP for valid phone', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/send-otp',
+      payload: { phone: '+40712345678' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().success).toBe(true);
+  });
+
+  it('should reject invalid phone', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/send-otp',
+      payload: { phone: '0712345678' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('POST /auth/verify-otp', () => {
+  it('should create new user and return forcePasswordSet on first OTP', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.jwt).toBeDefined();
+    expect(body.globalId).toBeDefined();
+    expect(body.forcePasswordSet).toBe(true);
+    expect(mockDb.identities).toHaveLength(1);
+    expect(mockDb.identities[0].forcePasswordSet).toBe(true);
+  });
+
+  it('should return existing user without forcePasswordSet if password exists', async () => {
+    // Pre-create user with password via register
+    await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: { phone: '+40712345678', password: 'SecurePass1!', firstName: 'A', lastName: 'B' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.forcePasswordSet).toBe(false);
+  });
+
+  it('should reject invalid OTP code', async () => {
+    mockOtpStatus = 'pending';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '000000' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('should reject missing code', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('POST /auth/set-password', () => {
+  it('should set password after OTP verification', async () => {
+    // Create user via OTP
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'NewSecure1!', confirmPassword: 'NewSecure1!' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.jwt).toBeDefined();
+    expect(body.globalId).toBeDefined();
+    expect(mockDb.identities[0].forcePasswordSet).toBe(false);
+    expect(mockDb.identities[0].hashedPassword).toBeDefined();
+  });
+
+  it('should reject mismatched passwords', async () => {
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'NewSecure1!', confirmPassword: 'Different1!' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('should reject short password', async () => {
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'short', confirmPassword: 'short' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('should reject password without uppercase', async () => {
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'nouppercase1', confirmPassword: 'nouppercase1' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('should reject password without number', async () => {
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'NoNumberHere!', confirmPassword: 'NoNumberHere!' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('should reject unauthenticated request', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      payload: { password: 'NewSecure1!', confirmPassword: 'NewSecure1!' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('should allow login with phone+password after set-password', async () => {
+    // OTP flow
+    const otpRes = await app.inject({
+      method: 'POST',
+      url: '/auth/verify-otp',
+      payload: { phone: '+40712345678', code: '123456' },
+    });
+    const { jwt: otpToken } = otpRes.json();
+
+    // Set password
+    await app.inject({
+      method: 'POST',
+      url: '/auth/set-password',
+      headers: { authorization: `Bearer ${otpToken}` },
+      payload: { password: 'NewSecure1!', confirmPassword: 'NewSecure1!' },
+    });
+
+    // Login with phone + password
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { phone: '+40712345678', password: 'NewSecure1!' },
+    });
+    expect(loginRes.statusCode).toBe(200);
+    expect(loginRes.json().jwt).toBeDefined();
   });
 });
