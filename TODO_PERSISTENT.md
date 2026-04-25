@@ -10,6 +10,61 @@
 
 ---
 
+## [ ] Cross-app SSO dedup audit — same bug ca eat (creat 2026-04-25)
+
+**Prioritate:** High — bugul cauzează conturi duplicate în ecosistem și poate scurge date la cleanup ulterior.
+
+**Context:** După ce am rezolvat bug-ul de pe `eat.4pro.io` (register-ul nu verifica 4pro-identity înainte de a crea cont local), am auditat celelalte 5 aplicații din ecosistem. Toate au aceeași anomalie: verifică DOAR baza lor proprie înainte de create, apoi sincronizează cu 4pro-identity "fire-and-forget" (non-blocking) sau prin proxy la o altă app care are același pattern.
+
+### Status per app
+
+| App | Pattern actual la `register` | Verdict | Fix priority |
+|---|---|---|---|
+| **PRO** | local-first (verifică PRO db pentru phone+email), creează user local, apoi `identityRegister` non-blocking | ❌ BUG | **P0** — sursa primară pentru `4pro-client` |
+| **eCabinet** | local-first (verifică eCabinet db pentru email + phone-fuzzy match pentru placeholder upgrade), creează în transaction, apoi `identityRegister` non-blocking | ❌ BUG | **P0** — sursa primară pentru `4pro-biz` |
+| **4pro-client** | Proxy către PRO `/api/auth/register` (PRO_API_URL=:6660). Nu verifică identity direct | ❌ BUG (moștenit din PRO) | **P1** — fix-ul PRO va remedia și aici, eventual schimbare la apel direct identity |
+| **4pro-biz** | Proxy către eCabinet `/api/v1/auth/login`. Nu verifică identity direct | ❌ BUG (moștenit din eCabinet) | **P1** — la fel, fix-ul eCabinet remediază; biz nu are register propriu, doar login proxy |
+| **4pro-landing** | Nu are API de auth — landing page pur | ✅ N/A | — |
+| **4pro-eat** | Identity-first cu pre-flight `/identity/exists`, fail-closed dacă identity e jos | ✅ FIX (commit `<TBD>` la 2026-04-25) | reference implementation |
+
+### Cum se manifestă bugul (în limbaj clar)
+
+Imaginează-ți ecosistemul ca un mall cu 5 magazine. Fiecare magazin are propriul registru de clienți + un birou central comun de evidență (4pro-identity). Bugul: când Maria intră în PRO și se înscrie, magazinul își notează "Maria, telefon X" în registrul lui propriu. Apoi spune biroului central "hei, e și Maria". Biroul confirmă. OK.
+
+A doua zi, Maria încearcă să se înscrie în eCabinet. eCabinet **NU întreabă biroul central** dacă există deja Maria. Verifică doar registrul propriu, nu găsește, deci o înscrie ca client nou. Apoi spune biroului "hei, e Maria". Biroul răspunde "Maria există deja" — dar pentru că PRO și eCabinet folosesc patterns diferite în spate, eCabinet uneori ignoră răspunsul, sau creează ca pe dublură.
+
+Rezultat: aceeași persoană are 2-3 ID-uri diferite în 4pro-identity, sau apare ca pro_embedded într-un loc și standalone în altul.
+
+### Fix recommended (în ordine de impact)
+
+1. **PRO + eCabinet** (P0) — schimbă ordinea: verifică identity ÎNAINTE de a crea local. Dacă identity zice "există", returnează 409 cu URL de login. Dacă zice "nu există", create în identity FIRST, apoi mirror local cu `globalId`. Reference: `4pro-eat/src/app/api/v1/auth/register/route.ts` (commit `<TBD>` 2026-04-25).
+2. **4pro-client** (P1) — opțional: ocolește proxy-ul către PRO și apelează identity direct (cleaner). Sau lasă proxy-ul după ce PRO e fix.
+3. **4pro-biz** (P1) — la fel, fix-ul eCabinet remediază tranzitiv.
+4. **Cleanup migration script** — pentru fiecare app, scriptul existent `4pro-eat/scripts/migrate-link-existing-identities.mjs` trebuie adaptat. Pattern: caut local users cu `globalId IS NULL`, întreb identity prin `/identity/exists`, dacă există deja sub alt globalId → re-link.
+
+### Estimări effort
+
+- PRO refactor: ~3h (register + login + tests + cleanup migration script)
+- eCabinet refactor: ~3h
+- 4pro-client cleanup: ~1h (după PRO)
+- 4pro-biz cleanup: ~1h (după eCabinet)
+- Cross-app cleanup migration (pentru utilizatori existenți deja duplicați): ~2h
+- **Total: ~10h** plus QA / deploy + smoke fiecare
+
+### Risk
+
+NO-TOUCH CRITIC pe PRO + eCabinet (sunt prod live). Schimbările trebuie:
+1. propose-confirm-apply per modificare (vezi `Master/CLAUDE.md` §2d)
+2. backwards-compatible — useri existenți nu trebuie să resemneze
+3. testat E2E înainte de deploy (TWG loop sau e2e-audit)
+
+### Reference incident
+
+Detectat în sesiunea 2026-04-25 când utilizatorul a încercat să creeze cont pe `eat.4pro.io` cu emailul folosit deja în PRO + eCabinet + Client. eat l-a creat duplicat. Vezi `4pro-eat/knowledge/lessons-learned.md` L01.
+
+
+---
+
 ## [ ] GDPR Ecosystem Agreement — 4PRO (creat 2026-04-23)
 
 **Prioritate:** High (pre-GA eat.4pro.io, pre-ML2 Wave 2 ecosystems, și pentru toate app-urile deja live).
