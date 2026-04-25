@@ -579,3 +579,68 @@ describe('POST /auth/set-password', () => {
     expect(loginRes.json().jwt).toBeDefined();
   });
 });
+
+describe('GET /identity/exists', () => {
+  beforeEach(() => {
+    mockDb.identities = [];
+    idCounter = 0;
+  });
+
+  it('returns 400 when no email and no phone provided', async () => {
+    const res = await app.inject({ method: 'GET', url: '/identity/exists' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for invalid email format', async () => {
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?email=not-an-email' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for invalid phone format', async () => {
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?phone=12345' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns exists=false for unknown email', async () => {
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?email=ghost@example.com' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ exists: false, byEmail: false, byPhone: false });
+  });
+
+  it('returns exists=true byEmail for matching email', async () => {
+    mockDb.identities.push({
+      globalId: 'g-1', phone: '+40700000001', email: 'known@example.com',
+      firstName: 'A', lastName: 'B', avatarUrl: null, locale: 'ro',
+      createdAt: new Date(), updatedAt: new Date(),
+    });
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?email=known@example.com' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ exists: true, byEmail: true, byPhone: false });
+  });
+
+  it('returns exists=true byPhone for matching phone', async () => {
+    mockDb.identities.push({
+      globalId: 'g-2', phone: '+40700000002', email: null,
+      firstName: 'C', lastName: 'D', avatarUrl: null, locale: 'ro',
+      createdAt: new Date(), updatedAt: new Date(),
+    });
+    // URL-encode the leading + (else Fastify decodes bare + as space).
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?phone=%2B40700000002' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ exists: true, byEmail: false, byPhone: true });
+  });
+
+  it('does NOT leak globalId or profile fields', async () => {
+    mockDb.identities.push({
+      globalId: 'g-3-secret-leak', phone: '+40700000003', email: 'leak@example.com',
+      firstName: 'Should', lastName: 'NotLeak', avatarUrl: null, locale: 'ro',
+      createdAt: new Date(), updatedAt: new Date(),
+    });
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?email=leak@example.com' });
+    const body = res.json();
+    expect(body).toEqual({ exists: true, byEmail: true, byPhone: false });
+    expect(body.globalId).toBeUndefined();
+    expect(body.firstName).toBeUndefined();
+    expect(body.phone).toBeUndefined();
+  });
+});

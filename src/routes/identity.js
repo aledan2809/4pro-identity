@@ -38,6 +38,42 @@ const PROFILE_SELECT = {
 };
 
 async function identityRoutes(fastify) {
+  // GET /identity/exists?email=…&phone=…
+  // Public read-only existence probe used by sibling 4PRO apps for cross-app
+  // duplicate detection BEFORE creating local user records. Does NOT leak
+  // globalId or any profile field — only existence booleans + which match.
+  // Rate-limited to avoid email enumeration scraping.
+  fastify.get('/exists', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request, reply) => {
+    const { email, phone } = request.query || {};
+
+    if (!email && !phone) {
+      return reply.code(400).send({ error: 'Provide email or phone (or both) as query parameter' });
+    }
+
+    const result = { exists: false, byEmail: false, byPhone: false };
+    const client = getClient();
+
+    if (email) {
+      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return reply.code(400).send({ error: 'Invalid email format' });
+      }
+      const hit = await client.identity.findUnique({ where: { email }, select: { globalId: true } });
+      result.byEmail = !!hit;
+    }
+
+    if (phone) {
+      const sanitized = sanitizePhone(phone);
+      if (!isValidE164(sanitized)) {
+        return reply.code(400).send({ error: 'Invalid phone format. Must be E.164 (e.g. +40712345678)' });
+      }
+      const hit = await client.identity.findUnique({ where: { phone: sanitized }, select: { globalId: true } });
+      result.byPhone = !!hit;
+    }
+
+    result.exists = result.byEmail || result.byPhone;
+    return reply.send(result);
+  });
+
   // GET /identity/:globalId
   fastify.get('/:globalId', async (request, reply) => {
     const payload = authenticate(request, reply);
