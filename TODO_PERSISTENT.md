@@ -136,3 +136,38 @@ Detectat în sesiunea 2026-04-25 când utilizatorul a încercat să creeze cont 
 - `4pro-identity/` → locul natural pentru centralized consent storage
 
 ---
+
+## [ ] 4pro-identity SSO secret mismatch — armed-but-dormant (creat 2026-04-29)
+
+**Prioritate:** Medium acum / **P0 imediat ce flow-ul login se rutează prin 4pro-identity** (vezi item-ul "Cross-app SSO dedup audit" mai sus — fix-ul P0 PRO + eCabinet va declanșa direct acest bug).
+
+**Context (verificat 2026-04-29):**
+- `CLAUDE.md:21` declară corect: *"DO NOT MODIFY: SSO_JWT_SECRET must match across PRO/Client/eCabinet"*.
+- DAR `src/lib/token.js:3-11` citește `process.env.JWT_SECRET` (NU `SSO_JWT_SECRET`) și folosește acea valoare atât la `jwt.sign` cât și la `jwt.verify`.
+- VPS1 `/var/www/4pro-identity/.env` are `JWT_SECRET="4pro-identity-j..."` — divergent de canonical-ul ecosistemului `4d87a48546d9220e...` (folosit de 4pro-eat, 4pro-client, 4pro-biz, PRO, eCabinet).
+- `src/routes/auth.js` setează activ cookie-ul `4pro_sso` cu token-ul semnat cu secretul greșit la lines 93, 136, 208, 258 (`setCookie(SSO_COOKIE, token, getCookieOptions())`).
+
+**De ce nu se manifestă în prod azi:**
+PRO este issuer-ul SSO activ (per `4pro-eat/AUDIT_GAPS.md` G-EAT-006 lessons). Niciun frontend nu rutează emiterea de token prin 4pro-identity. Endpoint-urile lui sunt folosite doar read-only (`/identity/exists` pentru cross-app dedup probe). Bugul e armed-but-not-triggered.
+
+**Ce-l declanșează:**
+Item-ul "Cross-app SSO dedup audit" de mai sus, pasul P0 PRO + eCabinet ("schimbă ordinea: verifică identity ÎNAINTE de a crea local"), va începe să ruteze login flow prin 4pro-identity. Din acel moment, fiecare login emite cookie cu secret greșit → toți consumer-ii (eat, client, biz, PRO, eCabinet) vor respinge cookie-ul → user redirected la `/login` în loop.
+
+**Fix recommended (alege una):**
+
+A. **Rename + align (preferat)** — modifică `src/lib/token.js` să citească `process.env.SSO_JWT_SECRET` în loc de `JWT_SECRET`, apoi setează `SSO_JWT_SECRET="4d87a48546d9220e..."` pe VPS1 `/var/www/4pro-identity/.env` (canonical din `Master/credentials/.env.shared`). Single source of truth; aliniat cu CLAUDE.md.
+
+B. **Two-secret architecture** — păstrează `JWT_SECRET` pentru tokens interne identity-only (ex: refresh tokens, internal service-to-service), folosește `SSO_JWT_SECRET` separat pentru cookie-ul `4pro_sso` user-facing. Cere refactor `signToken` să accepte parametru `audience` și să folosească secretul corect per audiență.
+
+C. **Document și amână** — dacă 4pro-identity rămâne intentional read-only (nu issuer SSO), elimină `setCookie(SSO_COOKIE, ...)` din `auth.js` (4 locații) ca să nu existe cale de declanșare. Riscul rămâne dacă cineva re-adaugă inadvertent.
+
+**Risk dacă rămâne neresolved la fix-ul P0:** silent SSO failure pe TOT ecosistemul 4PRO simultan în momentul flip-ului. Toți userii care fac login după acel deploy vor fi blocați.
+
+**Effort estimat:**
+- Variant A: ~30 min (1 linie cod + 1 entry env + restart PM2 + smoke test)
+- Variant B: ~2-3h (refactor signToken + tests)
+- Variant C: ~10 min (delete 4 setCookie calls + tests)
+
+**Reference:** investigare 2026-04-29 (sesiunea Direct pe 4pro-eat), `Master/HANDOFF-eat-session-2026-04-28.md` carry-forward CF#2.
+
+---
