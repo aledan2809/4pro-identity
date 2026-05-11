@@ -4,14 +4,22 @@ const { isValidE164, sanitizePhone } = require('../lib/validation');
 const { signToken, verifyToken } = require('../lib/token');
 const { sendOTP, verifyOTP } = require('../lib/twilio');
 
+const APP_SLUG = '4pro-identity';
+
 // Resolves the active controller entity for this app from Legal Hub.
 // Returns entity slug string or null. Never throws — registration must not be blocked.
+//
+// Latency note: this is awaited before the registration response is sent. The Legal Hub
+// active-entity endpoint is cached for 5 min (Cache-Control: public, max-age=300), so
+// warm cache round-trips are ~2ms. A cold cache or degraded Legal Hub adds up to 2.5s
+// (AbortSignal.timeout). Since registration is a one-time operation, this is acceptable.
+// If LEGAL_API_URL is absent, returns null immediately with zero overhead.
 async function resolveControllerEntity() {
   const base = process.env.LEGAL_API_URL;
   if (!base) return null;
   try {
     const res = await fetch(
-      `${base}/api/v1/public/active-entity?appSlug=4pro-identity`,
+      `${base}/api/v1/public/active-entity?appSlug=${APP_SLUG}`,
       { signal: AbortSignal.timeout(2500) }
     );
     if (!res.ok) return null;
