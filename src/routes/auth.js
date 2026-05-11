@@ -4,6 +4,24 @@ const { isValidE164, sanitizePhone } = require('../lib/validation');
 const { signToken, verifyToken } = require('../lib/token');
 const { sendOTP, verifyOTP } = require('../lib/twilio');
 
+// Resolves the active controller entity for this app from Legal Hub.
+// Returns entity slug string or null. Never throws — registration must not be blocked.
+async function resolveControllerEntity() {
+  const base = process.env.LEGAL_API_URL;
+  if (!base) return null;
+  try {
+    const res = await fetch(
+      `${base}/api/v1/public/active-entity?appSlug=4pro-identity`,
+      { signal: AbortSignal.timeout(2500) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data?.slug === 'string' ? data.slug : null;
+  } catch {
+    return null;
+  }
+}
+
 const SSO_COOKIE = '4pro_sso';
 
 function getCookieOptions() {
@@ -87,7 +105,9 @@ async function authRoutes(fastify) {
 
     const identity = await getClient().identity.create({ data });
 
-    const token = signToken(identity.globalId, identity.phone);
+    const controllerSlug = await resolveControllerEntity();
+    const tokenExtra = controllerSlug ? { controllerEntitySlug: controllerSlug } : {};
+    const token = signToken(identity.globalId, identity.phone, tokenExtra);
 
     reply
       .setCookie(SSO_COOKIE, token, getCookieOptions())
@@ -194,15 +214,21 @@ async function authRoutes(fastify) {
     }
 
     let identity = await getClient().identity.findUnique({ where: { phone: sanitized } });
+    let isNewIdentity = false;
 
     if (!identity) {
       identity = await getClient().identity.create({
         data: { phone: sanitized, forcePasswordSet: true },
       });
+      isNewIdentity = true;
     }
 
+    const controllerSlug = isNewIdentity ? await resolveControllerEntity() : null;
     const needsPassword = !identity.hashedPassword || !!identity.forcePasswordSet;
-    const token = signToken(identity.globalId, identity.phone, needsPassword ? { forcePasswordSet: true } : {});
+    const token = signToken(identity.globalId, identity.phone, {
+      ...(controllerSlug ? { controllerEntitySlug: controllerSlug } : {}),
+      ...(needsPassword ? { forcePasswordSet: true } : {}),
+    });
 
     reply
       .setCookie(SSO_COOKIE, token, getCookieOptions())
