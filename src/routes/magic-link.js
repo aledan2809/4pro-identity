@@ -59,18 +59,8 @@ async function sendWhatsAppMagicLink(providerPhone, providerName, serviceType, p
 }
 
 async function magicLinkRoutes(fastify) {
-  // Rate limit: 5 requests per minute per IP
-  await fastify.register(require('@fastify/rate-limit'), {
-    max: 5,
-    timeWindow: '1 minute',
-    keyGenerator: (request) => request.ip,
-    errorResponseBuilder: () => ({
-      error: 'Too many requests. Maximum 5 magic link requests per minute.',
-    }),
-  });
-
   // POST /api/magic-link/generate
-  fastify.post('/generate', async (request, reply) => {
+  fastify.post('/generate', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { providerPhone, serviceType, providerLocation } = request.body || {};
 
     if (!providerPhone || typeof providerPhone !== 'string' || !providerPhone.trim()) {
@@ -145,6 +135,12 @@ async function magicLinkRoutes(fastify) {
     try {
       payload = jwt.verify(token, MAGIC_LINK_SECRET, { algorithms: ['HS256'] });
     } catch {
+      return reply.code(401).send({ error: 'Invalid or expired token' });
+    }
+
+    const tokenHash = hashToken(token);
+    const record = await getClient().magicLink.findUnique({ where: { tokenHash } });
+    if (!record || record.expiresAt < new Date()) {
       return reply.code(401).send({ error: 'Invalid or expired token' });
     }
 
