@@ -32,3 +32,14 @@ model PhoneChangeLog {
 
   @@index([globalId])
 }
+
+model MagicLink {
+  id            Int      @id @default(autoincrement())
+  tokenHash     String   @unique @db.VarChar(255)
+  providerPhone String   @db.VarChar(20)
+  expiresAt     DateTime @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  metadata      Json
+
+  @@index([providerPhone])
+}
