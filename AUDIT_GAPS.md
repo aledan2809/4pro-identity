@@ -24,6 +24,24 @@
 
 ---
 
+### G-ID-003 — P1 HIGH — Magic-link double rate-limit register crashes server
+
+**Status**: ELIMINATED 2026-05-17 (commit `0f8eb4f`)
+**Finding**: `magicLinkRoutes` called `fastify.register(@fastify/rate-limit, ...)` inside the plugin scope after the plugin was already registered globally in `server.js`. This throws "FST_ERR_DEC_ALREADY_PRESENT: decorator already added" at startup, crashing the server before any request is served.
+**Fix**: Removed the redundant `fastify.register()` block. Added `{ config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }` directly on the POST `/generate` route definition — matching the pattern already used in `auth.js`.
+**Verification**: 80/80 tests pass.
+
+---
+
+### G-ID-004 — P1 HIGH — Magic-link /verify skips DB check (no revocation)
+
+**Status**: ELIMINATED 2026-05-17 (commit `0f8eb4f`)
+**Finding**: `GET /api/magic-link/verify` only validated the JWT signature via `jwt.verify()`. It never queried the `MagicLink` table by `tokenHash`. Consequence: (1) a revoked/deleted token would still verify as valid; (2) expired tokens already past `expiresAt` in DB would still pass if JWT `exp` hadn't elapsed; (3) single-use enforcement was impossible.
+**Fix**: After JWT verification, compute `hashToken(token)` and call `magicLink.findUnique({ where: { tokenHash } })`. Return 401 if no record exists or `record.expiresAt < new Date()`.
+**Verification**: 80/80 tests pass.
+
+---
+
 ## Open Gaps
 
 _None at this time._
@@ -36,3 +54,4 @@ _None at this time._
 |------|------|-------|-------|
 | 2026-05-17 | E2E CODE [7] | 67/100 | infra-checker no baseUrl; db-verifier 100; cross-suggester 100 |
 | 2026-05-17 | /review | — | P0 G-ID-001 + P1 G-ID-002 found; both fixed same session |
+| 2026-05-17 | /review (follow-up) | — | P1 G-ID-003 + P1 G-ID-004 found in magic-link.js; both fixed same session |
