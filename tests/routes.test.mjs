@@ -74,6 +74,8 @@ let mockOtpStatus = 'approved';
 twilioModule.sendOTP = async (phone) => ({ sid: 'mock-sid', status: 'pending' });
 twilioModule.verifyOTP = async (phone, code) => ({ status: mockOtpStatus });
 
+afterEach(() => { mockOtpStatus = 'approved'; });
+
 const { build } = require('../src/server');
 
 let app;
@@ -356,7 +358,6 @@ describe('POST /identity/change-phone', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { newPhone: '+40799999999', verificationCode: '000000' },
     });
-    mockOtpStatus = 'approved';
     expect(res.statusCode).toBe(401);
   });
 

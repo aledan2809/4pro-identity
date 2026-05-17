@@ -198,6 +198,7 @@ async function identityRoutes(fastify) {
     try {
       otpCheck = await verifyOTP(sanitized, verificationCode);
     } catch (err) {
+      fastify.log.error({ err, phone: sanitized }, 'OTP verification failed');
       return reply.code(500).send({ error: 'OTP verification failed' });
     }
 
