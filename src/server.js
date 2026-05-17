@@ -8,6 +8,7 @@ const rateLimit = require('@fastify/rate-limit');
 const authRoutes = require('./routes/auth');
 const identityRoutes = require('./routes/identity');
 const magicLinkRoutes = require('./routes/magic-link');
+const legalRoutes = require('./routes/legal');
 
 async function build() {
   const fastify = Fastify({
@@ -45,6 +46,7 @@ async function build() {
   await fastify.register(authRoutes, { prefix: '/auth' });
   await fastify.register(identityRoutes, { prefix: '/identity' });
   await fastify.register(magicLinkRoutes, { prefix: '/api/magic-link' });
+  await fastify.register(legalRoutes, { prefix: '/api/v1/legal' });
 
   return fastify;
 }
