@@ -57,7 +57,7 @@ const PROFILE_SELECT = {
 
 async function authRoutes(fastify) {
   // POST /auth/register
-  fastify.post('/register', async (request, reply) => {
+  fastify.post('/register', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { phone, password, firstName, lastName, email, avatarUrl, locale } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -124,7 +124,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/login
-  fastify.post('/login', async (request, reply) => {
+  fastify.post('/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { phone, password } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -179,7 +179,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/send-otp — send OTP via Twilio Verify
-  fastify.post('/send-otp', async (request, reply) => {
+  fastify.post('/send-otp', { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { phone } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -197,7 +197,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/verify-otp — verify OTP code and authenticate
-  fastify.post('/verify-otp', async (request, reply) => {
+  fastify.post('/verify-otp', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { phone, code } = request.body || {};
 
     const sanitized = sanitizePhone(phone);

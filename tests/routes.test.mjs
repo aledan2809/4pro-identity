@@ -349,13 +349,15 @@ describe('POST /identity/change-phone', () => {
     });
     const { jwt: token } = regRes.json();
 
+    mockOtpStatus = 'pending';
     const res = await app.inject({
       method: 'POST',
       url: '/identity/change-phone',
       headers: { authorization: `Bearer ${token}` },
       payload: { newPhone: '+40799999999', verificationCode: '000000' },
     });
-    expect(res.statusCode).toBe(400);
+    mockOtpStatus = 'approved';
+    expect(res.statusCode).toBe(401);
   });
 
   it('should reject invalid new phone format', async () => {

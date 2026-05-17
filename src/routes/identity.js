@@ -1,6 +1,7 @@
 const { getClient } = require('../lib/prisma');
 const { isValidE164, sanitizePhone } = require('../lib/validation');
 const { verifyToken } = require('../lib/token');
+const { verifyOTP } = require('../lib/twilio');
 
 function authenticate(request, reply) {
   const token = request.cookies?.['4pro_sso'] || extractBearer(request);
@@ -181,8 +182,8 @@ async function identityRoutes(fastify) {
 
     const { newPhone, verificationCode } = request.body || {};
 
-    if (!verificationCode || verificationCode !== '123456') {
-      return reply.code(400).send({ error: 'Invalid verification code' });
+    if (!verificationCode || typeof verificationCode !== 'string') {
+      return reply.code(400).send({ error: 'Verification code is required' });
     }
 
     const sanitized = sanitizePhone(newPhone);
@@ -190,6 +191,18 @@ async function identityRoutes(fastify) {
       return reply.code(400).send({
         error: 'Invalid phone format. Must be E.164 (e.g. +40712345678)',
       });
+    }
+
+    // Verify OTP sent to the new phone number via Twilio Verify
+    let otpCheck;
+    try {
+      otpCheck = await verifyOTP(sanitized, verificationCode);
+    } catch (err) {
+      return reply.code(500).send({ error: 'OTP verification failed' });
+    }
+
+    if (otpCheck.status !== 'approved') {
+      return reply.code(401).send({ error: 'Invalid or expired verification code' });
     }
 
     const existing = await getClient().identity.findUnique({

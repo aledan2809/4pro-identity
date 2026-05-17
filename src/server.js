@@ -3,9 +3,11 @@ require('dotenv').config();
 const Fastify = require('fastify');
 const cookie = require('@fastify/cookie');
 const cors = require('@fastify/cors');
+const rateLimit = require('@fastify/rate-limit');
 
 const authRoutes = require('./routes/auth');
 const identityRoutes = require('./routes/identity');
+const magicLinkRoutes = require('./routes/magic-link');
 
 async function build() {
   const fastify = Fastify({
@@ -16,6 +18,14 @@ async function build() {
         options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
       },
     },
+  });
+
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 100,
+    timeWindow: '1 minute',
+    skipOnError: false,
+    allowList: () => process.env.NODE_ENV === 'test',
   });
 
   await fastify.register(cookie);
@@ -34,6 +44,7 @@ async function build() {
 
   await fastify.register(authRoutes, { prefix: '/auth' });
   await fastify.register(identityRoutes, { prefix: '/identity' });
+  await fastify.register(magicLinkRoutes, { prefix: '/api/magic-link' });
 
   return fastify;
 }
