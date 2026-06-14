@@ -171,3 +171,50 @@ C. **Document și amână** — dacă 4pro-identity rămâne intentional read-on
 **Reference:** investigare 2026-04-29 (sesiunea Direct pe 4pro-eat), `Master/HANDOFF-eat-session-2026-04-28.md` carry-forward CF#2.
 
 ---
+
+## [ ] 🎯 Conversie destinatari remindere WhatsApp → useri, via link consent GDPR (creat 2026-06-12)
+
+**Prioritate:** Medium-High (growth lever cu cost de achiziție ~zero; infrastructura există deja cap-coadă).
+**Origine:** idee user (schițată anterior pentru PRO + eCabinet, re-codificată 2026-06-12 după ce s-a constatat că nu era scrisă nicăieri).
+
+### Ideea
+
+Pacienții (eCabinet) și atleții (PRO) care primesc **remindere pe WhatsApp** de la clinici/antrenori sunt utilizatori finali **fără cont** pe platformă. GDPR ne obligă oricum să le cerem consimțământ pentru procesarea datelor → folosim exact acest touchpoint obligatoriu ca funnel de conversie:
+
+```
+reminder WhatsApp → link semnare consent GDPR (Legal hub) → landing semnare
+→ după consent: CTA creare cont („vezi-ți programările/ședințele/sesiunile")
+→ user nou pe platformă, cost de achiziție zero
+```
+
+### Ce există deja (nu se construiește de la zero)
+
+- **Legal hub**: flux complet de semnare pe WhatsApp — `POST /api/v1/consents/whatsapp-link` → Meta Cloud API → landing `/sign` (live pe legal.knowbest.ro din 2026-05-05). ConsentRecord imutabil + entity routing.
+- **PRO + eCabinet**: remindere WhatsApp funcționale (@aledan/whatsapp, Meta Cloud API).
+- **4pro-identity**: SSO hub — contul creat la conversie intră direct în ecosistem (mall-style login once).
+
+### Ce trebuie construit
+
+1. **Landing page de semnare + conversie** (în sarcina ecosistemului 4PRO):
+   - Avantajele pentru client enumerate **foarte clar și apetisant, dar NU lung** — eventual cu **collapse menu / accordion** pentru detalii (cerință explicită user 2026-06-12)
+   - Exemple beneficii: vezi câte ședințe ți-au rămas, istoric programări, reminder-e automate, reprogramare rapidă, acces la planul tău
+   - După semnare consent → CTA creare cont (pre-completat cu numele/telefonul deja cunoscute din reminder flow)
+2. **Wiring per app**: PRO + eCabinet atașează link-ul de consent (Legal whatsapp-link) la fluxul de remindere existent — fie în primul reminder, fie ca mesaj dedicat GDPR
+3. **Cont pre-provisionat**: la creare cont, leagă userul de datele existente (programări/sesiuni create de clinică/antrenor pe numărul lui de telefon) — matching pe telefon via 4pro-identity
+4. **Tracking funnel**: trimise → click → consent semnat → cont creat (metrici per app)
+5. **Template Meta**: mesajul WhatsApp cu link consent necesită template aprobat Meta (~24-48h lead — submit early)
+
+### Dependențe / gotchas
+
+- Template-uri Meta Cloud API de aprobat înainte de orice trimitere
+- PRO + eCabinet = NO-TOUCH CRITIC → implementarea per-app cere sesiune dedicată propose-confirm-apply
+- Legal = NO-TOUCH CRITIC → orice modificare pe landing `/sign` (adăugarea CTA-ului de conversie) idem
+- Decizie de produs rămasă: cine trimite (clinica în numele ei / platforma), incentive da/nu, segmentare
+
+### Cross-refs
+
+- `Legal/TODO_PERSISTENT.md` Phase 5 (consent WhatsApp flow — DONE, baza tehnică)
+- `PRO/TODO_PERSISTENT.md` G-PRO-WA-001 (share WhatsApp deep-link — pattern UX înrudit)
+- `MarketingAutomation/TODO_PERSISTENT.md` campania kinetoterapie eCabinet (unghi B2B complementar: clinici noi via remindere WhatsApp; item-ul de față e B2C: pacienții clinicilor existente)
+
+> **Progres 2026-06-12 (regim mesh)**: partea **Legal** a funnelului LIVRATĂ (Legal commit `1ce23ed`, deployed legal.knowbest.ro): pagina `/sign` post-consent arată acum avantajele clientului (accordion) + CTA „Creează-mi contul" pre-completat, config per-app (`pro`+`ecabinet` seed-ate). **Rămas partea apps**: (1) PRO + eCabinet citesc `prefill_phone`/`prefill_email` pe `/register` (acum CTA merge, prefill = best-effort); (2) wiring trimitere link consent Legal pe fluxul de remindere WhatsApp (NO-TOUCH, sesiuni dedicate); (3) decizii produs (cine trimite, incentive, segmentare). Vezi `Legal/Reports/DIRECT-CHANGES-2026-06.md` 2026-06-12 (4).
