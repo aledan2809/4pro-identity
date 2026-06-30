@@ -75,6 +75,55 @@ async function identityRoutes(fastify) {
     return reply.send(result);
   });
 
+  // POST /identity/resolve { ssoToken }
+  // S2S canonical-id resolution for sibling 4PRO apps. Returns the CANONICAL
+  // globalId (UUID) for the phone carried by a valid SSO token.
+  //
+  // Closes the L79 "identity flap": a sibling app (PRO) historically stamped
+  // its LOCAL cuid into the SSO token's id claim instead of the canonical
+  // globalId. Consumers (4pro-client) that key Legal ConsentRecords on that
+  // claim create cuid orphans (a DSR on the canonical UUID then misses them).
+  // Identity is the source of truth — the token's phone resolves to the one
+  // canonical UUID regardless of what id claim the token carries.
+  //
+  // Auth model: a validly-signed SSO token IS the credential (the caller
+  // proves it already holds a session for that user). No enumeration risk —
+  // without a signed token you cannot probe phone→globalId. Reuses the shared
+  // SSO_JWT_SECRET every 4PRO app already holds; no new secret to provision.
+  fastify.post('/resolve', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (request, reply) => {
+    const { ssoToken } = request.body || {};
+    if (!ssoToken || typeof ssoToken !== 'string') {
+      return reply.code(400).send({ error: 'ssoToken required' });
+    }
+
+    let payload;
+    try {
+      payload = verifyToken(ssoToken);
+    } catch {
+      return reply.code(401).send({ error: 'Invalid or expired SSO token' });
+    }
+
+    const phone = payload && payload.phone;
+    if (!phone || typeof phone !== 'string') {
+      return reply.code(422).send({ error: 'Token carries no phone claim' });
+    }
+
+    const sanitized = sanitizePhone(phone);
+    if (!isValidE164(sanitized)) {
+      return reply.code(422).send({ error: 'Token phone is not valid E.164' });
+    }
+
+    const hit = await getClient().identity.findUnique({
+      where: { phone: sanitized },
+      select: { globalId: true },
+    });
+    if (!hit) {
+      return reply.code(404).send({ error: 'No identity for token phone' });
+    }
+
+    return reply.send({ globalId: hit.globalId });
+  });
+
   // GET /identity/:globalId
   fastify.get('/:globalId', async (request, reply) => {
     const payload = authenticate(request, reply);
