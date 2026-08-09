@@ -218,3 +218,21 @@ reminder WhatsApp → link semnare consent GDPR (Legal hub) → landing semnare
 - `MarketingAutomation/TODO_PERSISTENT.md` campania kinetoterapie eCabinet (unghi B2B complementar: clinici noi via remindere WhatsApp; item-ul de față e B2C: pacienții clinicilor existente)
 
 > **Progres 2026-06-12 (regim mesh)**: partea **Legal** a funnelului LIVRATĂ (Legal commit `1ce23ed`, deployed legal.knowbest.ro): pagina `/sign` post-consent arată acum avantajele clientului (accordion) + CTA „Creează-mi contul" pre-completat, config per-app (`pro`+`ecabinet` seed-ate). **Rămas partea apps**: (1) PRO + eCabinet citesc `prefill_phone`/`prefill_email` pe `/register` (acum CTA merge, prefill = best-effort); (2) wiring trimitere link consent Legal pe fluxul de remindere WhatsApp (NO-TOUCH, sesiuni dedicate); (3) decizii produs (cine trimite, incentive, segmentare). Vezi `Legal/Reports/DIRECT-CHANGES-2026-06.md` 2026-06-12 (4).
+
+## 🔍 Introspection Audit 2026-06-20
+> Audit complet (gap strategie↔cod · ghid per-pagină · deep research · funcțional + cyber).
+> 3 acțiuni deschise · 🔴 4 critice (librărie/local — fără scor extern).
+> Rapoarte: `Reports/INTROSPECTION-2026-06-20/` (00-SUMMARY.md, 01-gap-strategy-vs-code.md, 03-deep-research-optimization.md, 04b-security-audit.md)
+> Checklist Alex centralizat: `Master/reports/Alex_TODO_2026-06-20.md` + tab „Introspection Audit" în UI Master.
+
+## 🔴 4pro-identity (SSO CORE, `id.4pro.io`) — ACTIVE dar modificările cascadează pe 7 app-uri — **conține un CRITIC**
+Sursă: `4pro-identity/Reports/INTROSPECTION-2026-06-20/`
+
+- [ ] 🔴🔴 **VERIFICĂ ACUM pe VPS1: `SSO_JWT_SECRET` setat (NU `JWT_SECRET`) + ≠ `dev-secret-change-me`** — `token.js:3` are fallback hardcodat public, iar codul citește `SSO_JWT_SECRET` dar `.env` definește `JWT_SECRET`. Dacă varul corect lipsește pe prod → token-urile întregului ecosistem 4PRO sunt semnate cu un secret PUBLIC → impersonare totală. _(Am încercat verificarea read-only, dar accesul la `.env` prod cere autorizarea ta explicită — fă-o tu sau spune-mi „ai voie să citești varul pe VPS1".)_ + confirmă `COOKIE_SECURE=true`, `COOKIE_DOMAIN=.4pro.io`.
+  - 🗣️ *Pe înțelesul tău:* Asta e cheia de login pentru toate cele 7 aplicații 4PRO. Dacă pe server lipsește setarea corectă, sistemul folosește o „cheie de avarie" publică pe care o știe oricine citește codul — adică oricine poate fabrica login-uri valide pentru tot ecosistemul. Verifică ACUM că e setată cheia bună.
+- [ ] 🔴 **Sesiune securitate SSO dedicată** (propose-confirm, cascadează): fix secret + `verifyToken` să VERIFICE issuer + pin algoritm + `subject:globalId` explicit + audit `x-user-id` pe 4pro-client (cele 54 rute). _Cele 2 critice se compun = auth-ul 4PRO forjabil._
+  - 🗣️ *Pe înțelesul tău:* O sesiune dedicată care întărește login-ul comun al ecosistemului (verifică cine a emis token-ul, fixează cheia, închide bypass-ul din 4pro-client). Schimbările afectează 7 aplicații, deci se fac cu grijă, cu acordul tău.
+- [ ] 🟡 **`npm audit fix`** (11 vulns, toate din tooling Prisma, nu runtime) + decizie strategică RS256/JWKS + refresh-token rotation.
+  - 🗣️ *Pe înțelesul tău:* Câteva vulnerabilități sunt doar în unelte de build (risc real mic) — le curăț. Plus o decizie de viitor: trecem la un model de chei mai sigur, standard în industrie?
+
+---
