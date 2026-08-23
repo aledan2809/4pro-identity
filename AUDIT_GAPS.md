@@ -4,6 +4,33 @@
 
 ---
 
+## Open Gaps
+
+### G-ID-002 — P1 — Secretul SSO cade tăcut pe o valoare vizibilă în cod
+
+**Status**: OPEN (verificat 2026-08-23 — **producția e în regulă azi**, riscul e la viitor)
+
+`src/lib/token.js:3` citește `process.env.SSO_JWT_SECRET || 'dev-secret-change-me'`.
+Verificat live pe VPS1: `.env` are un secret real de 64 de caractere, `server.js:1` îl
+încarcă prin dotenv înainte de orice, iar proba funcțională confirmă că un token semnat cu
+valoarea din cod e **respins cu 401** pe `/identity/resolve`. Deci ramura de rezervă nu se
+atinge acum. `COOKIE_SECURE=true`, `COOKIE_DOMAIN=.4pro.io`.
+
+**Riscul**: dacă `.env` e vreodată pierdut, redenumit sau necitit, serviciul **nu refuză să
+pornească** — coboară tăcut la un secret pe care oricine cu acces la depozit îl poate citi,
+și continuă să semneze tokenuri pentru toate cele 7 aplicații din ecosistem. Un eșec de
+configurare devine astfel o breșă tăcută, în loc de o pană zgomotoasă.
+
+**Reparație propusă**: fail-closed — fără `SSO_JWT_SECRET`, procesul se oprește la pornire
+cu mesaj explicit, în loc să folosească o valoare implicită. Aceeași sesiune ar trebui să
+verifice și emitentul la verificare (`jwt.verify` nu impune azi `issuer`, deși semnarea îl
+pune) — vezi și itemul din `Master/TODO_PERSISTENT.md` despre driftul VPS↔depozit.
+
+**De ce nu s-a aplicat acum**: 4pro-identity e autoritatea SSO a 7 aplicații; o schimbare la
+pornirea procesului cere sesiune dedicată, cu verificarea fiecărui consumator după.
+
+---
+
 ## Eliminated Gaps
 
 ### G-ID-001 — P0 CRITICAL — Hardcoded OTP bypass in change-phone
