@@ -75,6 +75,76 @@ async function identityRoutes(fastify) {
     return reply.send(result);
   });
 
+  // POST /identity/register { email?, phone?, firstName?, lastName?, source? }
+  // S2S identity-first registration for sibling apps (eCabinet G-ECAB-REG-003).
+  // Creates a passwordless identity anchored on email and/or phone and returns
+  // the canonical globalId. Phone is optional at the schema level since
+  // 2026-08-24 — email-only signups (eCabinet public registration) finally get
+  // a real ecosystem link instead of globalId=null.
+  fastify.post('/register', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (request, reply) => {
+    // S2S only: without the shared key the route is closed (fail-closed) — an
+    // open register endpoint would allow unrecoverable email-squatting (the
+    // identity service has no email-based auth to reclaim a squatted address).
+    const s2sKey = process.env.IDENTITY_S2S_KEY;
+    if (!s2sKey || request.headers['x-identity-api-key'] !== s2sKey) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+
+    const { email, phone, firstName, lastName, source } = request.body || {};
+
+    if (!email && !phone) {
+      return reply.code(400).send({ error: 'Provide email or phone (or both)' });
+    }
+
+    const data = {};
+
+    if (email !== undefined && email !== null) {
+      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return reply.code(400).send({ error: 'Invalid email format' });
+      }
+      data.email = email;
+    }
+
+    if (phone !== undefined && phone !== null && phone !== '') {
+      const sanitized = sanitizePhone(phone);
+      if (!isValidE164(sanitized)) {
+        return reply.code(400).send({ error: 'Invalid phone format. Must be E.164 (e.g. +40712345678)' });
+      }
+      data.phone = sanitized;
+    }
+
+    if (firstName && typeof firstName === 'string' && firstName.trim()) data.firstName = firstName.trim();
+    if (lastName && typeof lastName === 'string' && lastName.trim()) data.lastName = lastName.trim();
+
+    const client = getClient();
+
+    if (data.email) {
+      const emailHit = await client.identity.findUnique({ where: { email: data.email }, select: { globalId: true } });
+      if (emailHit) return reply.code(409).send({ error: 'Email already registered' });
+    }
+    if (data.phone) {
+      const phoneHit = await client.identity.findUnique({ where: { phone: data.phone }, select: { globalId: true } });
+      if (phoneHit) return reply.code(409).send({ error: 'Phone number already registered' });
+    }
+
+    let identity;
+    try {
+      identity = await client.identity.create({ data });
+    } catch (err) {
+      // Unique-constraint race between the pre-checks and the insert.
+      if (err && err.code === 'P2002') {
+        return reply.code(409).send({ error: 'Email or phone already registered' });
+      }
+      throw err;
+    }
+
+    request.log.info(
+      { globalId: identity.globalId, source: typeof source === 'string' ? source.slice(0, 50) : undefined },
+      'identity-register'
+    );
+    return reply.code(201).send({ globalId: identity.globalId });
+  });
+
   // POST /identity/resolve { ssoToken }
   // S2S canonical-id resolution for sibling 4PRO apps. Returns the CANONICAL
   // globalId (UUID) for the phone carried by a valid SSO token.
@@ -275,7 +345,7 @@ async function identityRoutes(fastify) {
     await getClient().phoneChangeLog.create({
       data: {
         globalId: payload.globalId,
-        oldPhone: existing.phone,
+        oldPhone: existing.phone || '',
         newPhone: sanitized,
       },
     });

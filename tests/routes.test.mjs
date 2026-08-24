@@ -379,6 +379,99 @@ describe('POST /identity/change-phone', () => {
   });
 });
 
+describe('POST /identity/register', () => {
+  beforeEach(() => {
+    mockDb.identities = [];
+    idCounter = 0;
+  });
+
+  it('returns 403 without the S2S key', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      payload: { email: 'oricine@example.com' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('registers an email-only identity and returns globalId (eCabinet contract)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'pacient@example.com', source: 'eCabinet' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().globalId).toBeTruthy();
+    expect(mockDb.identities[0].email).toBe('pacient@example.com');
+    expect(mockDb.identities[0].phone).toBeUndefined();
+  });
+
+  it('returns 409 for duplicate email', async () => {
+    await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'dup@example.com' } });
+    const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'dup@example.com' } });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('registers a phone-only identity', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { phone: '+40712345699', firstName: 'Ion', lastName: 'Pop' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mockDb.identities[0].phone).toBe('+40712345699');
+    expect(mockDb.identities[0].firstName).toBe('Ion');
+  });
+
+  it('returns 409 for duplicate phone', async () => {
+    await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { phone: '+40712345699' } });
+    const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { phone: '+40712345699' } });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('returns 400 when neither email nor phone is provided', async () => {
+    const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { source: 'x' } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for invalid email', async () => {
+    const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'nu-e-email' } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for invalid phone', async () => {
+    const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { phone: '12345' } });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('POST /identity/change-phone (email-only identity sets first phone)', () => {
+  beforeEach(() => {
+    mockDb.identities = [];
+    mockDb.phoneLogs = [];
+    idCounter = 0;
+  });
+
+  it('lets a phone-less identity set its first phone (oldPhone logged as empty)', async () => {
+    const reg = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'nofon@example.com' } });
+    const { globalId } = reg.json();
+    const jwt = (await import('module')).createRequire(import.meta.url)('jsonwebtoken')
+      .sign({ globalId, phone: null }, process.env.SSO_JWT_SECRET, { expiresIn: '5m', issuer: 'https://id.4pro.io' });
+    mockOtpStatus = 'approved';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/change-phone',
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { newPhone: '+40712345677', verificationCode: '000000' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.phoneLogs[0].oldPhone).toBe('');
+    expect(mockDb.identities[0].phone).toBe('+40712345677');
+  });
+});
+
 describe('POST /auth/send-otp', () => {
   it('should send OTP for valid phone', async () => {
     const res = await app.inject({

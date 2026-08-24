@@ -8,7 +8,7 @@ generator client {
 
 model Identity {
   globalId         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phone            String           @unique @db.VarChar(20)
+  phone            String?          @unique @db.VarChar(20)
   hashedPassword   String?          @db.VarChar(255)
   email            String?          @unique
   firstName        String           @default("") @db.VarChar(100)
