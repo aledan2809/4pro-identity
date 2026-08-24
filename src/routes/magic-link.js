@@ -2,7 +2,13 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../lib/prisma');
 
-const MAGIC_LINK_SECRET = process.env.MAGIC_LINK_SECRET || 'magic-link-secret-change-me';
+// Fail-closed (same class as G-ID-002): a guessable magic-link secret would let
+// anyone forge join links, so refuse to run without the real one.
+const MAGIC_LINK_SECRET = process.env.MAGIC_LINK_SECRET;
+if (!MAGIC_LINK_SECRET) {
+  console.error('[identity] FATAL: MAGIC_LINK_SECRET is not set — refusing to start.');
+  process.exit(1);
+}
 const MAGIC_LINK_EXPIRY_DAYS = 7;
 const CLIENT_JOIN_URL = 'https://client.4pro.io/join';
 

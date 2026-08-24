@@ -16,6 +16,13 @@ describe('JWT token', () => {
     expect(payload.phone).toBe(phone);
   });
 
+  it('should reject tokens signed without the ecosystem issuer', () => {
+    const jwt = require('jsonwebtoken');
+    // Same secret, no iss claim — the pre-May-2026 issuer-less shape.
+    const foreign = jwt.sign({ globalId: 'x', phone: '+40700000001' }, process.env.SSO_JWT_SECRET, { expiresIn: '1h' });
+    expect(() => verifyToken(foreign)).toThrow(/issuer/);
+  });
+
   it('should reject tampered tokens', () => {
     const token = signToken('some-id', '+40700000000');
     expect(() => verifyToken(token + 'x')).toThrow();
