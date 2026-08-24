@@ -6,7 +6,7 @@
 
 ## Open Gaps
 
-*(niciun gap deschis — urmăririle noi merg în TODO_PERSISTENT: LEGAL_HMAC_KEY absent pe VPS pentru rutele legal acum live, punctul 4 /identity/register programat)*
+*(niciun gap deschis — urmărire rămasă în TODO_PERSISTENT: LEGAL_HMAC_KEY absent pe VPS pentru rutele legal acum live. Punctul 4 LIVRAT 2026-08-24 21:00: `POST /identity/register` S2S + `Identity.phone` opțional, commit `fa18df3` — vezi ledgerul de mai jos.)*
 
 ---
 
