@@ -6,32 +6,20 @@
 
 ## Open Gaps
 
-### G-ID-002 — P1 — Secretul SSO cade tăcut pe o valoare vizibilă în cod
-
-**Status**: OPEN (verificat 2026-08-23 — **producția e în regulă azi**, riscul e la viitor)
-
-`src/lib/token.js:3` citește `process.env.SSO_JWT_SECRET || 'dev-secret-change-me'`.
-Verificat live pe VPS1: `.env` are un secret real de 64 de caractere, `server.js:1` îl
-încarcă prin dotenv înainte de orice, iar proba funcțională confirmă că un token semnat cu
-valoarea din cod e **respins cu 401** pe `/identity/resolve`. Deci ramura de rezervă nu se
-atinge acum. `COOKIE_SECURE=true`, `COOKIE_DOMAIN=.4pro.io`.
-
-**Riscul**: dacă `.env` e vreodată pierdut, redenumit sau necitit, serviciul **nu refuză să
-pornească** — coboară tăcut la un secret pe care oricine cu acces la depozit îl poate citi,
-și continuă să semneze tokenuri pentru toate cele 7 aplicații din ecosistem. Un eșec de
-configurare devine astfel o breșă tăcută, în loc de o pană zgomotoasă.
-
-**Reparație propusă**: fail-closed — fără `SSO_JWT_SECRET`, procesul se oprește la pornire
-cu mesaj explicit, în loc să folosească o valoare implicită. Aceeași sesiune ar trebui să
-verifice și emitentul la verificare (`jwt.verify` nu impune azi `issuer`, deși semnarea îl
-pune) — vezi și itemul din `Master/TODO_PERSISTENT.md` despre driftul VPS↔depozit.
-
-**De ce nu s-a aplicat acum**: 4pro-identity e autoritatea SSO a 7 aplicații; o schimbare la
-pornirea procesului cere sesiune dedicată, cu verificarea fiecărui consumator după.
+*(niciun gap deschis — urmăririle noi merg în TODO_PERSISTENT: LEGAL_HMAC_KEY absent pe VPS pentru rutele legal acum live, punctul 4 /identity/register programat)*
 
 ---
 
 ## Eliminated Gaps
+
+### G-ID-002 — P1 — Secretul SSO cade tăcut pe o valoare vizibilă în cod
+
+**Status**: ELIMINATED 2026-08-24 (commit `da96e43`, deployat pe VPS1 prin conversia la git clone)
+**Fix**: fail-closed — fără `SSO_JWT_SECRET` procesul se oprește la pornire cu mesaj FATAL (dovedit live: `node -e "require('./src/lib/token')"` fără env → exit 1). Același tratament pentru `MAGIC_LINK_SECRET` (fallback ghicibil `magic-link-secret-change-me` eliminat; secret real provizionat pe VPS + oglindit în `Master/credentials/4pro-identity.env` ÎNAINTE de restart — poartă de deploy identificată de review-ul advers).
+**Bonus (aceeași sesiune)**: `verifyToken` impune acum `iss=https://id.4pro.io` — verificat per emitent (identity/PRO/client/biz/eCabinet/eat toți ștampilează din mai 2026, inclusiv în build-urile deployate; cel mai lung token pre-issuer a expirat în iunie). Probat live: `/identity/resolve` acceptă token cu iss (404 pe telefon fictiv = verify trecut), respinge token fără iss (401). Test golden adăugat (`tests/token.test.mjs`, `toThrow(/issuer/)`). Suita 81/81.
+**VPS sub git (punctul 3)**: `/var/www/4pro-identity` convertit din rsync-drift în git clone pe `master` (backup `/root/backups/4pro-identity-pre-gitclone-2026-08-24.tar.gz`); driftul istoric (rate-limit + rute magic-link/legal nedeployate) a intrat live odată cu HEAD; `npm install` a adus `@fastify/rate-limit`. Health `/health` ok + L41 pe toate cele 6 fronturi + login real PRO 200.
+
+---
 
 ### G-ID-001 — P0 CRITICAL — Hardcoded OTP bypass in change-phone
 
