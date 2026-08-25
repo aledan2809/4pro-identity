@@ -407,10 +407,12 @@ describe('POST /identity/register', () => {
     expect(mockDb.identities[0].phone).toBeUndefined();
   });
 
-  it('returns 409 for duplicate email', async () => {
-    await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'dup@example.com' } });
+  it('does not create a second row for a duplicate email (adopts the shell)', async () => {
+    const first = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'dup@example.com' } });
     const res = await app.inject({ method: 'POST', url: '/identity/register', headers: { 'x-identity-api-key': 'test-s2s-key' }, payload: { email: 'dup@example.com' } });
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().globalId).toBe(first.json().globalId);
+    expect(mockDb.identities.length).toBe(1);
   });
 
   it('registers a phone-only identity', async () => {
@@ -463,8 +465,8 @@ describe('email is treated case-insensitively (anti-duplicate)', () => {
     expect(mockDb.identities[0].email).toBe('ion.pop@gmail.com');
   });
 
-  it('rejects a case-variant duplicate with 409', async () => {
-    await app.inject({
+  it('a case-variant duplicate resolves to the SAME identity, never a second one', async () => {
+    const first = await app.inject({
       method: 'POST',
       url: '/identity/register',
       headers: { 'x-identity-api-key': 'test-s2s-key' },
@@ -476,7 +478,8 @@ describe('email is treated case-insensitively (anti-duplicate)', () => {
       headers: { 'x-identity-api-key': 'test-s2s-key' },
       payload: { email: 'ION.POP@GMAIL.com' },
     });
-    expect(res.statusCode).toBe(409);
+    expect(res.json().globalId).toBe(first.json().globalId);
+    expect(mockDb.identities.length).toBe(1);
   });
 
   it('/identity/exists finds a lowercase identity when probed with mixed case', async () => {
@@ -547,6 +550,42 @@ describe('PUT /identity/:globalId normalizes email too (no re-split)', () => {
       headers: { authorization: `Bearer ${jwtFor(globalId)}` },
       payload: { email: 'VICTIM@example.com' },
     });
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe('POST /identity/register — unclaimed shells cannot lock anyone out', () => {
+  beforeEach(() => { mockDb.identities = []; idCounter = 0; });
+
+  const reg = (payload) => app.inject({
+    method: 'POST', url: '/identity/register',
+    headers: { 'x-identity-api-key': 'test-s2s-key' }, payload,
+  });
+
+  it('adopts an email-only shell instead of refusing (200 + same globalId)', async () => {
+    const first = await reg({ email: 'victima@example.com', source: 'squatter' });
+    const second = await reg({ email: 'victima@example.com', source: 'eCabinet' });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().globalId).toBe(first.json().globalId);
+    expect(second.json().adopted).toBe(true);
+    expect(mockDb.identities.length).toBe(1);
+  });
+
+  it('still refuses when the identity has a password (someone proved it)', async () => {
+    await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: {
+        phone: '+40712345655', password: 'parola1234',
+        firstName: 'Real', lastName: 'Om', email: 'real@example.com',
+      },
+    });
+    const res = await reg({ email: 'real@example.com', source: 'eCabinet' });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('still refuses when the identity has a phone', async () => {
+    await reg({ email: 'cufon@example.com', phone: '+40712345644' });
+    const res = await reg({ email: 'cufon@example.com', source: 'eCabinet' });
     expect(res.statusCode).toBe(409);
   });
 });

@@ -132,8 +132,27 @@ async function identityRoutes(fastify) {
     const client = getClient();
 
     if (data.email) {
-      const emailHit = await client.identity.findUnique({ where: { email: data.email }, select: { globalId: true } });
-      if (emailHit) return reply.code(409).send({ error: 'Email already registered' });
+      const emailHit = await client.identity.findUnique({
+        where: { email: data.email },
+        select: { globalId: true, hashedPassword: true, phone: true },
+      });
+      if (emailHit) {
+        // An identity with no password AND no phone was never proven by anyone:
+        // it is the shell this very route mints from an unverified address. If a
+        // real person now registers that address at a consumer app, adopt the
+        // shell instead of refusing — otherwise anyone could permanently lock a
+        // stranger out of the ecosystem just by typing their email first, and
+        // the shell itself grants no access (login needs phone + password).
+        const unclaimed = !emailHit.hashedPassword && !emailHit.phone;
+        if (!unclaimed) {
+          return reply.code(409).send({ error: 'Email already registered' });
+        }
+        request.log.info(
+          { globalId: emailHit.globalId, source: typeof source === 'string' ? source.slice(0, 50) : undefined },
+          'identity-register-adopted-unclaimed'
+        );
+        return reply.code(200).send({ globalId: emailHit.globalId, adopted: true });
+      }
     }
     if (data.phone) {
       const phoneHit = await client.identity.findUnique({ where: { phone: data.phone }, select: { globalId: true } });
