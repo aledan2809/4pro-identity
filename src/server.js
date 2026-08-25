@@ -21,9 +21,17 @@ async function build() {
     },
   });
 
+  // Rate limiting keys on request.ip. Every caller is a sibling 4PRO app on this
+  // same host (all consumers use http://localhost:4100; the port is firewalled
+  // off the internet and no reverse proxy fronts it), so request.ip is 127.0.0.1
+  // for effectively all traffic and the global bucket is ecosystem-wide.
+  // Deliberately NOT setting trustProxy: nothing sets X-Forwarded-For here, so
+  // trusting it would let any caller spoof its key and skip limits entirely.
+  // Instead: the global cap is sized for ecosystem-wide S2S traffic, and the
+  // abuse-sensitive routes key on the identity they target (see auth.js).
   await fastify.register(rateLimit, {
     global: true,
-    max: 100,
+    max: Number(process.env.RATE_LIMIT_GLOBAL_MAX || 600),
     timeWindow: '1 minute',
     skipOnError: false,
     allowList: () => process.env.NODE_ENV === 'test',

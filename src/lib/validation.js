@@ -10,4 +10,17 @@ function sanitizePhone(phone) {
   return phone.replace(/[^\d+]/g, '');
 }
 
-module.exports = { isValidE164, sanitizePhone };
+// Email is compared case-insensitively everywhere: uniqueness in Postgres is
+// exact, so storing `Foo@x.com` next to `foo@x.com` silently creates two
+// identities for one person — the orphan class L79 exists to close.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(email) {
+  return typeof email === 'string' && EMAIL_REGEX.test(email);
+}
+
+function normalizeEmail(email) {
+  return typeof email === 'string' ? email.trim().toLowerCase() : '';
+}
+
+module.exports = { isValidE164, sanitizePhone, isValidEmail, normalizeEmail };

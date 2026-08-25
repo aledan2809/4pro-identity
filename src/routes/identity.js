@@ -1,7 +1,19 @@
 const { getClient } = require('../lib/prisma');
-const { isValidE164, sanitizePhone } = require('../lib/validation');
+const { isValidE164, sanitizePhone, isValidEmail, normalizeEmail } = require('../lib/validation');
+const { timingSafeEqual } = require('crypto');
 const { verifyToken } = require('../lib/token');
 const { verifyOTP } = require('../lib/twilio');
+
+// Constant-time S2S key check. Compare BYTE lengths, not character lengths:
+// timingSafeEqual throws on unequal buffers, and a header of multibyte
+// characters can match in characters while differing in bytes — which would
+// turn a plain rejection into an unhandled 500.
+function s2sKeyMatches(presented, expected) {
+  const a = Buffer.from(presented, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 function authenticate(request, reply) {
   const token = request.cookies?.['4pro_sso'] || extractBearer(request);
@@ -55,10 +67,10 @@ async function identityRoutes(fastify) {
     const client = getClient();
 
     if (email) {
-      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!isValidEmail(email)) {
         return reply.code(400).send({ error: 'Invalid email format' });
       }
-      const hit = await client.identity.findUnique({ where: { email }, select: { globalId: true } });
+      const hit = await client.identity.findUnique({ where: { email: normalizeEmail(email) }, select: { globalId: true } });
       result.byEmail = !!hit;
     }
 
@@ -86,7 +98,8 @@ async function identityRoutes(fastify) {
     // open register endpoint would allow unrecoverable email-squatting (the
     // identity service has no email-based auth to reclaim a squatted address).
     const s2sKey = process.env.IDENTITY_S2S_KEY;
-    if (!s2sKey || request.headers['x-identity-api-key'] !== s2sKey) {
+    const presented = request.headers['x-identity-api-key'];
+    if (!s2sKey || typeof presented !== 'string' || !s2sKeyMatches(presented, s2sKey)) {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
@@ -99,10 +112,10 @@ async function identityRoutes(fastify) {
     const data = {};
 
     if (email !== undefined && email !== null) {
-      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!isValidEmail(email)) {
         return reply.code(400).send({ error: 'Invalid email format' });
       }
-      data.email = email;
+      data.email = normalizeEmail(email);
     }
 
     if (phone !== undefined && phone !== null && phone !== '') {
@@ -257,16 +270,21 @@ async function identityRoutes(fastify) {
       if (email === null) {
         updateData.email = null;
       } else {
-        if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (!isValidEmail(email)) {
           return reply.code(400).send({ error: 'Invalid email format' });
         }
-        if (email !== existing.email) {
-          const emailExists = await getClient().identity.findUnique({ where: { email } });
+        // Normalize here too: an un-normalized update re-creates the case-variant
+        // split the register paths close, and the lookup below would miss an
+        // existing lowercase row — letting two identities hold the same
+        // effective address (Postgres UNIQUE is case-sensitive).
+        const normalized = normalizeEmail(email);
+        if (normalized !== existing.email) {
+          const emailExists = await getClient().identity.findUnique({ where: { email: normalized } });
           if (emailExists) {
             return reply.code(409).send({ error: 'Email already in use' });
           }
         }
-        updateData.email = email;
+        updateData.email = normalized;
       }
     }
 

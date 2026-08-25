@@ -23,6 +23,14 @@ describe('JWT token', () => {
     expect(() => verifyToken(foreign)).toThrow(/issuer/);
   });
 
+  it('rejects a token signed with alg=none (algorithms pinned to HS256)', () => {
+    const jwt = require('jsonwebtoken');
+    const none = jwt.sign({ globalId: 'x', phone: '+40700000002' }, '', {
+      algorithm: 'none', issuer: 'https://id.4pro.io', expiresIn: '5m',
+    });
+    expect(() => verifyToken(none)).toThrow();
+  });
+
   it('should reject tampered tokens', () => {
     const token = signToken('some-id', '+40700000000');
     expect(() => verifyToken(token + 'x')).toThrow();

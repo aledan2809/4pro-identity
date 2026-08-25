@@ -447,6 +447,146 @@ describe('POST /identity/register', () => {
   });
 });
 
+describe('email is treated case-insensitively (anti-duplicate)', () => {
+  beforeEach(() => {
+    mockDb.identities = [];
+    idCounter = 0;
+  });
+
+  it('stores the email lowercased', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'Ion.Pop@Gmail.COM' },
+    });
+    expect(mockDb.identities[0].email).toBe('ion.pop@gmail.com');
+  });
+
+  it('rejects a case-variant duplicate with 409', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'ion.pop@gmail.com' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'ION.POP@GMAIL.com' },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('/identity/exists finds a lowercase identity when probed with mixed case', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'ion.pop@gmail.com' },
+    });
+    const res = await app.inject({ method: 'GET', url: '/identity/exists?email=Ion.Pop@GMAIL.com' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().byEmail).toBe(true);
+  });
+
+  it('/auth/register stores the email lowercased too', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        phone: '+40712345688', password: 'parola1234',
+        firstName: 'Ion', lastName: 'Pop', email: 'Mixed.Case@Example.COM',
+      },
+    });
+    expect(mockDb.identities[0].email).toBe('mixed.case@example.com');
+  });
+});
+
+describe('PUT /identity/:globalId normalizes email too (no re-split)', () => {
+  beforeEach(() => { mockDb.identities = []; idCounter = 0; });
+
+  const jwtFor = (globalId) => {
+    const jwt = require('jsonwebtoken');
+    return jwt.sign({ globalId, phone: '+40712345600' }, process.env.SSO_JWT_SECRET, {
+      expiresIn: '5m', issuer: 'https://id.4pro.io',
+    });
+  };
+
+  it('stores a profile-update email lowercased', async () => {
+    const reg = await app.inject({
+      method: 'POST', url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'first@example.com' },
+    });
+    const { globalId } = reg.json();
+    const res = await app.inject({
+      method: 'PUT', url: `/identity/${globalId}`,
+      headers: { authorization: `Bearer ${jwtFor(globalId)}` },
+      payload: { email: 'Second.Address@Example.COM' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.identities[0].email).toBe('second.address@example.com');
+  });
+
+  it('refuses to take over another identity email via case variation', async () => {
+    await app.inject({
+      method: 'POST', url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'victim@example.com' },
+    });
+    const mine = await app.inject({
+      method: 'POST', url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s-key' },
+      payload: { email: 'mine@example.com' },
+    });
+    const { globalId } = mine.json();
+    const res = await app.inject({
+      method: 'PUT', url: `/identity/${globalId}`,
+      headers: { authorization: `Bearer ${jwtFor(globalId)}` },
+      payload: { email: 'VICTIM@example.com' },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe('POST /identity/register S2S key comparison', () => {
+  beforeEach(() => { mockDb.identities = []; idCounter = 0; });
+
+  it('rejects a key of the same length but wrong content', async () => {
+    const wrong = 'x'.repeat('test-s2s-key'.length);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': wrong },
+      payload: { email: 'oricine@example.com' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('rejects a multibyte key of equal character length with 403, not 500', async () => {
+    const multibyte = 'ă'.repeat('test-s2s-key'.length);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': multibyte },
+      payload: { email: 'oricine@example.com' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('rejects a key that is a prefix of the real one', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/identity/register',
+      headers: { 'x-identity-api-key': 'test-s2s' },
+      payload: { email: 'oricine@example.com' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 describe('POST /identity/change-phone (email-only identity sets first phone)', () => {
   beforeEach(() => {
     mockDb.identities = [];

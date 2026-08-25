@@ -1,6 +1,6 @@
 const { getClient } = require('../lib/prisma');
 const { hashPassword, verifyPassword } = require('../lib/password');
-const { isValidE164, sanitizePhone } = require('../lib/validation');
+const { isValidE164, sanitizePhone, isValidEmail, normalizeEmail } = require('../lib/validation');
 const { signToken, verifyToken } = require('../lib/token');
 const { sendOTP, verifyOTP } = require('../lib/twilio');
 
@@ -55,9 +55,22 @@ const PROFILE_SELECT = {
   updatedAt: true,
 };
 
+
+// All traffic arrives from localhost (sibling apps calling S2S), so limiting by
+// IP would put every user in one bucket: "3 OTPs per minute" would mean three
+// for the whole ecosystem, not three per person. Key on the phone being
+// targeted so the per-user intent survives; fall back to IP when absent.
+// NOTE: these routes must also set `hook: 'preHandler'` — the limiter runs at
+// onRequest by default, where request.body is not parsed yet and every caller
+// would silently collapse back into the shared IP bucket.
+function phoneKey(request) {
+  const p = sanitizePhone(request.body && request.body.phone);
+  return p || request.ip;
+}
+
 async function authRoutes(fastify) {
   // POST /auth/register
-  fastify.post('/register', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request, reply) => {
+  fastify.post('/register', { config: { rateLimit: { max: 5, timeWindow: '1 minute', keyGenerator: phoneKey, hook: 'preHandler' } } }, async (request, reply) => {
     const { phone, password, firstName, lastName, email, avatarUrl, locale } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -82,18 +95,20 @@ async function authRoutes(fastify) {
     }
 
     if (email !== undefined && email !== null) {
-      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!isValidEmail(email)) {
         return reply.code(400).send({ error: 'Invalid email format' });
       }
     }
+
+    const normalizedEmail = email ? normalizeEmail(email) : null;
 
     const existing = await getClient().identity.findUnique({ where: { phone: sanitized } });
     if (existing) {
       return reply.code(409).send({ error: 'Phone number already registered' });
     }
 
-    if (email) {
-      const emailExists = await getClient().identity.findUnique({ where: { email } });
+    if (normalizedEmail) {
+      const emailExists = await getClient().identity.findUnique({ where: { email: normalizedEmail } });
       if (emailExists) {
         return reply.code(409).send({ error: 'Email already registered' });
       }
@@ -107,7 +122,7 @@ async function authRoutes(fastify) {
       lastName: lastName.trim(),
     };
 
-    if (email) data.email = email;
+    if (normalizedEmail) data.email = normalizedEmail;
     if (avatarUrl) data.avatarUrl = avatarUrl;
     if (locale) data.locale = locale;
 
@@ -124,7 +139,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/login
-  fastify.post('/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
+  fastify.post('/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute', keyGenerator: phoneKey, hook: 'preHandler' } } }, async (request, reply) => {
     const { phone, password } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -179,7 +194,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/send-otp — send OTP via Twilio Verify
-  fastify.post('/send-otp', { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (request, reply) => {
+  fastify.post('/send-otp', { config: { rateLimit: { max: 3, timeWindow: '1 minute', keyGenerator: phoneKey, hook: 'preHandler' } } }, async (request, reply) => {
     const { phone } = request.body || {};
 
     const sanitized = sanitizePhone(phone);
@@ -197,7 +212,7 @@ async function authRoutes(fastify) {
   });
 
   // POST /auth/verify-otp — verify OTP code and authenticate
-  fastify.post('/verify-otp', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (request, reply) => {
+  fastify.post('/verify-otp', { config: { rateLimit: { max: 5, timeWindow: '1 minute', keyGenerator: phoneKey, hook: 'preHandler' } } }, async (request, reply) => {
     const { phone, code } = request.body || {};
 
     const sanitized = sanitizePhone(phone);

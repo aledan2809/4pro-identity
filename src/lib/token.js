@@ -22,7 +22,7 @@ function verifyToken(token) {
   // Issuer is enforced: every ecosystem issuer (identity, PRO, 4pro-client,
   // 4pro-biz, eCabinet) has stamped it since May 2026 and the shortest-lived
   // pre-issuer tokens (biz, 30d) expired in June — a token without it is foreign.
-  return jwt.verify(token, SSO_JWT_SECRET, { issuer: SSO_ISSUER });
+  return jwt.verify(token, SSO_JWT_SECRET, { issuer: SSO_ISSUER, algorithms: ['HS256'] });
 }
 
 module.exports = { signToken, verifyToken };
