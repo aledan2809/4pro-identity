@@ -206,6 +206,9 @@ async function authRoutes(fastify) {
       await sendOTP(sanitized);
       return reply.send({ success: true, message: 'OTP sent' });
     } catch (err) {
+      if (err && err.code === 'SMS_COUNTRY_NOT_ALLOWED') {
+        return reply.code(400).send({ error: 'SMS codes are sent only to Romanian (+40) and UAE (+971) mobiles' });
+      }
       fastify.log.error({ err, phone: sanitized }, 'Failed to send OTP');
       return reply.code(500).send({ error: 'Failed to send OTP' });
     }
